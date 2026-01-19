@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { useTimelineStore } from '@/stores/useTimelineStore'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { HeapObject, StackFrame, RuntimeValue } from '@/core/js/types'
+import type { HeapObject, StackFrame, RuntimeValue, ClosureVariable } from '@/core/js/types'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 
 export function MemoryView() {
   const currentStep = useTimelineStore((s) => s.getCurrentStep())
@@ -85,6 +87,9 @@ interface StackFrameBoxProps {
 }
 
 function StackFrameBox({ frame, isTop }: StackFrameBoxProps) {
+  const [showVars, setShowVars] = useState(true)
+  const hasVariables = frame.variables && frame.variables.length > 0
+
   return (
     <div
       className={`rounded border p-2 ${
@@ -101,6 +106,53 @@ function StackFrameBox({ frame, isTop }: StackFrameBoxProps) {
           </span>
         )}
       </div>
+
+      {/* Local variables */}
+      {hasVariables && (
+        <div className="mt-2">
+          <button
+            onClick={() => setShowVars(!showVars)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showVars ? (
+              <ChevronDown className="w-3 h-3" />
+            ) : (
+              <ChevronRight className="w-3 h-3" />
+            )}
+            <span>Local Variables ({frame.variables!.length})</span>
+          </button>
+
+          <AnimatePresence>
+            {showVars && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-1 space-y-0.5 text-xs font-mono">
+                  {frame.variables!.map((v) => (
+                    <div key={v.name} className="flex items-center gap-2 pl-2">
+                      <span className={`px-1 rounded text-[10px] ${
+                        v.kind === 'const'
+                          ? 'bg-red-500/20 text-red-400'
+                          : v.kind === 'let'
+                          ? 'bg-yellow-500/20 text-yellow-400'
+                          : 'bg-gray-500/20 text-gray-400'
+                      }`}>
+                        {v.kind}
+                      </span>
+                      <span className="text-foreground">{v.name}</span>
+                      <span className="text-muted-foreground">=</span>
+                      <span className="text-primary">{formatValue(v.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
     </div>
   )
 }
@@ -110,6 +162,7 @@ interface HeapObjectBoxProps {
 }
 
 function HeapObjectBox({ object }: HeapObjectBoxProps) {
+  const [showClosure, setShowClosure] = useState(false)
   const properties = Array.from(object.properties.entries()).filter(
     ([key]) => !key.startsWith('__')
   )
@@ -121,6 +174,8 @@ function HeapObjectBox({ object }: HeapObjectBoxProps) {
       ? 'border-blue-500/50 bg-blue-500/10'
       : 'border-purple-500/50 bg-purple-500/10'
 
+  const hasClosure = object.type === 'function' && object.closure && object.closure.length > 0
+
   return (
     <div className={`rounded border p-2 ${typeColor}`}>
       <div className="flex items-center gap-2 mb-1">
@@ -131,6 +186,11 @@ function HeapObjectBox({ object }: HeapObjectBoxProps) {
           {object.type}
           {object.name && `: ${object.name}`}
         </span>
+        {hasClosure && (
+          <span className="text-xs bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded">
+            closure
+          </span>
+        )}
       </div>
 
       {object.type !== 'function' && properties.length > 0 && (
@@ -148,6 +208,55 @@ function HeapObjectBox({ object }: HeapObjectBoxProps) {
           )}
         </div>
       )}
+
+      {/* Closure section for functions */}
+      {hasClosure && (
+        <div className="mt-2">
+          <button
+            onClick={() => setShowClosure(!showClosure)}
+            className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+          >
+            {showClosure ? (
+              <ChevronDown className="w-3 h-3" />
+            ) : (
+              <ChevronRight className="w-3 h-3" />
+            )}
+            <span>Captured Variables ({object.closure!.length})</span>
+          </button>
+
+          <AnimatePresence>
+            {showClosure && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-2 pl-2 border-l-2 border-orange-500/30 space-y-1">
+                  {object.closure!.map((cv, index) => (
+                    <ClosureVariableRow key={`${cv.name}-${index}`} variable={cv} />
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface ClosureVariableRowProps {
+  variable: ClosureVariable
+}
+
+function ClosureVariableRow({ variable }: ClosureVariableRowProps) {
+  return (
+    <div className="text-xs font-mono flex items-center gap-2">
+      <span className="text-muted-foreground">{variable.fromScope}:</span>
+      <span className="text-foreground">{variable.name}</span>
+      <span className="text-muted-foreground">=</span>
+      <span className="text-primary">{formatValue(variable.value)}</span>
     </div>
   )
 }

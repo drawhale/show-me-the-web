@@ -19,12 +19,26 @@ export interface ScopeSnapshot {
   currentScopeId: string
 }
 
+// Closure captured variable
+export interface ClosureVariable {
+  name: string
+  value: RuntimeValue
+  fromScope: string
+}
+
 // Memory types
 export interface HeapObject {
   id: string
   type: 'object' | 'array' | 'function'
   properties: Map<string, RuntimeValue>
   name?: string // for functions
+  closure?: ClosureVariable[] // captured variables for functions
+}
+
+export interface StackFrameVariable {
+  name: string
+  value: RuntimeValue
+  kind: 'var' | 'let' | 'const'
 }
 
 export interface StackFrame {
@@ -32,6 +46,7 @@ export interface StackFrame {
   name: string
   scopeId: string
   returnAddress?: number
+  variables?: StackFrameVariable[]
 }
 
 export interface MemorySnapshot {

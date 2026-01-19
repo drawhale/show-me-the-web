@@ -1,4 +1,4 @@
-import type { HeapObject, StackFrame, MemorySnapshot, RuntimeValue } from './types'
+import type { HeapObject, StackFrame, MemorySnapshot, RuntimeValue, ClosureVariable } from './types'
 
 let heapIdCounter = 0
 let stackIdCounter = 0
@@ -15,7 +15,8 @@ export class MemoryModel {
   allocateObject(
     type: 'object' | 'array' | 'function',
     properties: Map<string, RuntimeValue> = new Map(),
-    name?: string
+    name?: string,
+    closure?: ClosureVariable[]
   ): string {
     const id = `heap_${heapIdCounter++}`
     this.heap.set(id, {
@@ -23,6 +24,7 @@ export class MemoryModel {
       type,
       properties,
       name,
+      closure,
     })
     return id
   }
@@ -72,12 +74,14 @@ export class MemoryModel {
         type: obj.type,
         name: obj.name,
         properties: new Map(obj.properties),
+        closure: obj.closure ? obj.closure.map(cv => ({ ...cv })) : undefined,
       })),
       stack: this.stack.map((frame) => ({
         id: frame.id,
         name: frame.name,
         scopeId: frame.scopeId,
         returnAddress: frame.returnAddress,
+        variables: frame.variables ? frame.variables.map(v => ({ ...v })) : undefined,
       })),
     }
   }

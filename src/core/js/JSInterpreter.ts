@@ -3,7 +3,7 @@ import type * as t from '@babel/types'
 import { Scope, resetScopeCounter } from './Scope'
 import { MemoryModel, resetMemoryCounter } from './MemoryModel'
 import type { ExecutionStep } from '@/stores/useTimelineStore'
-import type { RuntimeValue, ScopeSnapshot, MemorySnapshot } from './types'
+import type { RuntimeValue, ScopeSnapshot, MemorySnapshot, ClosureVariable } from './types'
 
 interface InterpreterState {
   scope: Scope
@@ -12,10 +12,51 @@ interface InterpreterState {
   stepId: number
 }
 
+function updateClosureValues(state: InterpreterState): void {
+  // Update closure values for all function objects in heap
+  for (const [, heapObj] of state.memory.heap) {
+    if (heapObj.type === 'function' && heapObj.closure) {
+      const funcData = heapObj.properties.get('__func__') as { scope: Scope } | undefined
+      if (funcData?.scope) {
+        // Update each closure variable with current value from scope
+        heapObj.closure = captureClosureVariables(funcData.scope)
+      }
+    }
+  }
+}
+
+function updateStackFrameVariables(state: InterpreterState): void {
+  // Build a map of scopeId -> scope for quick lookup
+  const scopeMap = new Map<string, Scope>()
+  let currentScope: Scope | null = state.scope
+  while (currentScope) {
+    scopeMap.set(currentScope.id, currentScope)
+    currentScope = currentScope.parent
+  }
+
+  // Update each stack frame with its scope's variables
+  for (const frame of state.memory.stack) {
+    const scope = scopeMap.get(frame.scopeId)
+    if (scope) {
+      frame.variables = Array.from(scope.variables.entries()).map(([name, variable]) => ({
+        name,
+        value: variable.value,
+        kind: variable.kind,
+      }))
+    }
+  }
+}
+
 function createSnapshot(state: InterpreterState): {
   scopeSnapshot: ScopeSnapshot
   memorySnapshot: MemorySnapshot
 } {
+  // Update closure values before taking snapshot
+  updateClosureValues(state)
+
+  // Update stack frame variables
+  updateStackFrameVariables(state)
+
   return {
     scopeSnapshot: {
       scopes: state.scope.getScopeChain(),
@@ -41,6 +82,35 @@ function addStep(
     scopeSnapshot,
     memorySnapshot,
   })
+}
+
+function captureClosureVariables(scope: Scope): ClosureVariable[] {
+  const captured: ClosureVariable[] = []
+  let current: Scope | null = scope
+
+  while (current && current.type !== 'global') {
+    for (const [name, variable] of current.variables) {
+      // Don't capture functions themselves to avoid circular references
+      if (variable.value && typeof variable.value === 'object' &&
+          'type' in variable.value && variable.value.type === 'reference') {
+        // Skip for now, just capture primitives for cleaner display
+        captured.push({
+          name,
+          value: variable.value,
+          fromScope: current.name,
+        })
+      } else {
+        captured.push({
+          name,
+          value: variable.value,
+          fromScope: current.name,
+        })
+      }
+    }
+    current = current.parent
+  }
+
+  return captured
 }
 
 function evaluateExpression(
@@ -415,8 +485,11 @@ function evaluateFunctionExpression(
   const properties = new Map<string, RuntimeValue>()
   properties.set('__func__', funcData as unknown as RuntimeValue)
 
+  // Capture closure variables for visualization
+  const closure = captureClosureVariables(state.scope)
+
   const name = node.type === 'FunctionExpression' && node.id ? node.id.name : 'anonymous'
-  const heapId = state.memory.allocateObject('function', properties, name)
+  const heapId = state.memory.allocateObject('function', properties, name, closure.length > 0 ? closure : undefined)
 
   return { type: 'reference', heapId }
 }
@@ -501,7 +574,10 @@ function executeFunctionDeclaration(
   const properties = new Map<string, RuntimeValue>()
   properties.set('__func__', funcData as unknown as RuntimeValue)
 
-  const heapId = state.memory.allocateObject('function', properties, name)
+  // Capture closure variables for visualization
+  const closure = captureClosureVariables(state.scope)
+
+  const heapId = state.memory.allocateObject('function', properties, name, closure.length > 0 ? closure : undefined)
   state.scope.declare(name, 'var', { type: 'reference', heapId })
 
   addStep(state, 'declaration', `Declare function ${name}`, node)
