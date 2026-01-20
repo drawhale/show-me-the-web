@@ -2,6 +2,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/useEditorStore";
 import {
+  useTimelineStore,
+  type DOMOperation,
+} from "@/stores/useTimelineStore";
+import {
   useVisualizationStore,
   type SelectedElementInfo,
 } from "@/stores/useVisualizationStore";
@@ -11,9 +15,63 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export function OutputPanel() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const { htmlCode, cssCode } = useEditorStore();
+  const { steps, currentStepIndex } = useTimelineStore();
   const { selectedElement, setSelectedElement, setMode, setCSSTab } =
     useVisualizationStore();
   const [selectMode, setSelectMode] = useState(false);
+
+  // Apply DOM operations based on current step
+  const applyDOMOperations = useCallback(() => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+
+    // Reset iframe to initial state first
+    const fullHtml = htmlCode.replace(
+      "</head>",
+      `<style>${cssCode}</style></head>`,
+    );
+    doc.open();
+    doc.write(fullHtml);
+    doc.close();
+
+    // Apply all DOM operations up to and including current step
+    if (currentStepIndex >= 0) {
+      for (let i = 0; i <= currentStepIndex; i++) {
+        const step = steps[i];
+        if (step.domOperation) {
+          applyDOMOperation(doc, step.domOperation);
+        }
+      }
+    }
+  }, [htmlCode, cssCode, steps, currentStepIndex]);
+
+  const applyDOMOperation = (doc: Document, op: DOMOperation) => {
+    const element = doc.querySelector(op.selector);
+    if (!element) return;
+
+    const htmlElement = element as HTMLElement;
+
+    switch (op.type) {
+      case 'setTextContent':
+        element.textContent = op.value;
+        break;
+      case 'setInnerHTML':
+        element.innerHTML = op.value;
+        break;
+      case 'setProperty':
+        if (op.property) {
+          // Use any for dynamic property assignment
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (htmlElement as any)[op.property] = op.value;
+        }
+        break;
+      case 'setAttribute':
+        if (op.property) {
+          element.setAttribute(op.property, op.value);
+        }
+        break;
+    }
+  };
 
   const getElementPath = (element: Element): string => {
     const parts: string[] = [];
@@ -174,8 +232,18 @@ export function OutputPanel() {
     updateIframe();
   }, [htmlCode, cssCode]);
 
+  // Apply DOM operations when timeline step changes
   useEffect(() => {
-    setupElementSelection();
+    if (steps.length > 0 && currentStepIndex >= 0) {
+      applyDOMOperations();
+      // Re-setup element selection after DOM changes
+      setTimeout(() => setupElementSelection(), 100);
+    }
+  }, [currentStepIndex, steps, applyDOMOperations, setupElementSelection]);
+
+  useEffect(() => {
+    const cleanup = setupElementSelection();
+    return cleanup;
   }, [selectMode, setupElementSelection]);
 
   const clearSelection = () => {
@@ -187,6 +255,7 @@ export function OutputPanel() {
       }
     }
     setSelectedElement(null);
+    setSelectMode(false);
   };
 
   return (

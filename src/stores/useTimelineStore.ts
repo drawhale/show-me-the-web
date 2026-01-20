@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import type { ScopeSnapshot, MemorySnapshot } from '@/core/js/types'
 
+export interface DOMOperation {
+  type: 'setProperty' | 'setAttribute' | 'setTextContent' | 'setInnerHTML'
+  selector: string  // e.g., '#counter', '.title'
+  property?: string
+  value: string
+}
+
 export interface ExecutionStep {
   id: number
   type: 'declaration' | 'assignment' | 'call' | 'return' | 'expression' | 'block-enter' | 'block-exit'
@@ -10,6 +17,7 @@ export interface ExecutionStep {
   scopeSnapshot: ScopeSnapshot
   memorySnapshot: MemorySnapshot
   highlightedCode?: { start: number; end: number }
+  domOperation?: DOMOperation
 }
 
 interface TimelineState {

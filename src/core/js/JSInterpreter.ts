@@ -2,7 +2,7 @@ import * as parser from '@babel/parser'
 import type * as t from '@babel/types'
 import { Scope, resetScopeCounter } from './Scope'
 import { MemoryModel, resetMemoryCounter } from './MemoryModel'
-import type { ExecutionStep } from '@/stores/useTimelineStore'
+import type { ExecutionStep, DOMOperation } from '@/stores/useTimelineStore'
 import type { RuntimeValue, ScopeSnapshot, MemorySnapshot, ClosureVariable } from './types'
 
 interface InterpreterState {
@@ -70,7 +70,8 @@ function addStep(
   state: InterpreterState,
   type: ExecutionStep['type'],
   description: string,
-  node: t.Node
+  node: t.Node,
+  domOperation?: DOMOperation
 ): void {
   const { scopeSnapshot, memorySnapshot } = createSnapshot(state)
   state.steps.push({
@@ -81,6 +82,7 @@ function addStep(
     column: node.loc?.start.column || 0,
     scopeSnapshot,
     memorySnapshot,
+    domOperation,
   })
 }
 
@@ -292,6 +294,71 @@ function evaluateAssignmentExpression(
     return newValue
   }
 
+  // Handle MemberExpression assignment: obj.prop = value
+  if (node.left.type === 'MemberExpression') {
+    const obj = evaluateExpression(node.left.object as t.Expression, state)
+
+    // Check if it's a reference (object/array in heap)
+    if (obj && typeof obj === 'object' && 'type' in obj && obj.type === 'reference') {
+      const heapObj = state.memory.getObject(obj.heapId)
+      if (heapObj) {
+        // Get property name
+        let propName: string | undefined
+        if (node.left.property.type === 'Identifier') {
+          propName = node.left.property.name
+        } else if (node.left.computed) {
+          propName = String(evaluateExpression(node.left.property as t.Expression, state))
+        }
+
+        if (propName) {
+          // Check if it's a DOM element
+          const selector = heapObj.properties.get('__domSelector__')
+          if (typeof selector === 'string') {
+            // This is a DOM element - record the operation
+            const stringValue = String(value)
+            let domOp: DOMOperation | undefined
+
+            if (propName === 'textContent') {
+              domOp = { type: 'setTextContent', selector, value: stringValue }
+            } else if (propName === 'innerHTML') {
+              domOp = { type: 'setInnerHTML', selector, value: stringValue }
+            } else if (propName === 'style') {
+              // For style, we'd need special handling
+            } else {
+              domOp = { type: 'setProperty', selector, property: propName, value: stringValue }
+            }
+
+            addStep(
+              state,
+              'assignment',
+              `DOM: ${selector}.${propName} = ${formatValue(value)}`,
+              node,
+              domOp
+            )
+            return value
+          }
+
+          // Regular object property assignment
+          heapObj.properties.set(propName, value)
+
+          // Get object name for description
+          let objName = 'object'
+          if (node.left.object.type === 'Identifier') {
+            objName = node.left.object.name
+          }
+
+          addStep(
+            state,
+            'assignment',
+            `Assign ${objName}.${propName} = ${formatValue(value)}`,
+            node
+          )
+          return value
+        }
+      }
+    }
+  }
+
   return value
 }
 
@@ -317,7 +384,7 @@ function evaluateCallExpression(
   node: t.CallExpression,
   state: InterpreterState
 ): RuntimeValue {
-  // Handle built-in functions or skip DOM operations
+  // Handle built-in functions or DOM operations
   if (node.callee.type === 'MemberExpression') {
     const obj = node.callee.object
     if (obj.type === 'Identifier' && obj.name === 'console') {
@@ -325,8 +392,37 @@ function evaluateCallExpression(
       return undefined
     }
     if (obj.type === 'Identifier' && obj.name === 'document') {
-      // Skip document calls but record step
-      addStep(state, 'call', 'DOM operation (skipped in visualization)', node)
+      // Handle document.getElementById
+      const prop = node.callee.property
+      if (prop.type === 'Identifier' && prop.name === 'getElementById') {
+        const arg = node.arguments[0]
+        if (arg && arg.type !== 'SpreadElement' && arg.type !== 'ArgumentPlaceholder') {
+          const id = evaluateExpression(arg as t.Expression, state)
+          if (typeof id === 'string') {
+            // Create a DOM element reference
+            const properties = new Map<string, RuntimeValue>()
+            properties.set('__domSelector__', `#${id}`)
+            const heapId = state.memory.allocateObject('object', properties, 'DOMElement')
+            addStep(state, 'call', `document.getElementById("${id}")`, node)
+            return { type: 'reference', heapId }
+          }
+        }
+      }
+      // Handle document.querySelector
+      if (prop.type === 'Identifier' && prop.name === 'querySelector') {
+        const arg = node.arguments[0]
+        if (arg && arg.type !== 'SpreadElement' && arg.type !== 'ArgumentPlaceholder') {
+          const selector = evaluateExpression(arg as t.Expression, state)
+          if (typeof selector === 'string') {
+            const properties = new Map<string, RuntimeValue>()
+            properties.set('__domSelector__', selector)
+            const heapId = state.memory.allocateObject('object', properties, 'DOMElement')
+            addStep(state, 'call', `document.querySelector("${selector}")`, node)
+            return { type: 'reference', heapId }
+          }
+        }
+      }
+      addStep(state, 'call', 'DOM operation (skipped)', node)
       return undefined
     }
   }
