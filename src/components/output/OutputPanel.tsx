@@ -75,12 +75,16 @@ export function OutputPanel() {
         outline-offset: 2px !important;
         background-color: rgba(59, 130, 246, 0.1) !important;
       }
-      ${selectMode ? `
+      ${
+        selectMode
+          ? `
       *, *::before, *::after {
-        cursor: crosshair !important;
+        cursor: default !important;
         user-select: none !important;
       }
-      ` : ''}
+      `
+          : ""
+      }
     `;
 
     // Remove previous listeners
