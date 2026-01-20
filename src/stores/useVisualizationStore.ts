@@ -2,18 +2,26 @@ import { create } from 'zustand'
 
 export type VisualizationMode = 'css' | 'js'
 export type JSVisualizationTab = 'scope' | 'memory' | 'context'
-export type CSSVisualizationTab = 'cascade' | 'specificity' | 'scope'
+export type CSSVisualizationTab = 'cascade' | 'specificity' | 'applied'
+
+export interface SelectedElementInfo {
+  tagName: string
+  id: string | null
+  classes: string[]
+  path: string // CSS selector path to the element
+  inlineStyle: string | null // style attribute value
+}
 
 interface VisualizationState {
   mode: VisualizationMode
   jsTab: JSVisualizationTab
   cssTab: CSSVisualizationTab
-  selectedElement: string | null
+  selectedElement: SelectedElementInfo | null
 
   setMode: (mode: VisualizationMode) => void
   setJSTab: (tab: JSVisualizationTab) => void
   setCSSTab: (tab: CSSVisualizationTab) => void
-  setSelectedElement: (element: string | null) => void
+  setSelectedElement: (element: SelectedElementInfo | null) => void
 }
 
 export const useVisualizationStore = create<VisualizationState>((set) => ({
