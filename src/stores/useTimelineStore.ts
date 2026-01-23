@@ -8,9 +8,14 @@ export interface DOMOperation {
   value: string
 }
 
+export interface ConsoleOutput {
+  type: 'log' | 'warn' | 'error' | 'info'
+  args: string[]
+}
+
 export interface ExecutionStep {
   id: number
-  type: 'declaration' | 'assignment' | 'call' | 'return' | 'expression' | 'block-enter' | 'block-exit'
+  type: 'declaration' | 'assignment' | 'call' | 'return' | 'expression' | 'block-enter' | 'block-exit' | 'console'
   description: string
   line: number
   column: number
@@ -18,6 +23,7 @@ export interface ExecutionStep {
   memorySnapshot: MemorySnapshot
   highlightedCode?: { start: number; end: number }
   domOperation?: DOMOperation
+  consoleOutput?: ConsoleOutput
 }
 
 interface TimelineState {

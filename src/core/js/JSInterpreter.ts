@@ -2,7 +2,7 @@ import * as parser from '@babel/parser'
 import type * as t from '@babel/types'
 import { Scope, resetScopeCounter } from './Scope'
 import { MemoryModel, resetMemoryCounter } from './MemoryModel'
-import type { ExecutionStep, DOMOperation } from '@/stores/useTimelineStore'
+import type { ExecutionStep, DOMOperation, ConsoleOutput } from '@/stores/useTimelineStore'
 import type { RuntimeValue, ScopeSnapshot, MemorySnapshot, ClosureVariable } from './types'
 
 interface InterpreterState {
@@ -71,7 +71,8 @@ function addStep(
   type: ExecutionStep['type'],
   description: string,
   node: t.Node,
-  domOperation?: DOMOperation
+  domOperation?: DOMOperation,
+  consoleOutput?: ConsoleOutput
 ): void {
   const { scopeSnapshot, memorySnapshot } = createSnapshot(state)
   state.steps.push({
@@ -83,6 +84,7 @@ function addStep(
     scopeSnapshot,
     memorySnapshot,
     domOperation,
+    consoleOutput,
   })
 }
 
@@ -388,7 +390,36 @@ function evaluateCallExpression(
   if (node.callee.type === 'MemberExpression') {
     const obj = node.callee.object
     if (obj.type === 'Identifier' && obj.name === 'console') {
-      // Skip console calls
+      // Handle console calls
+      const prop = node.callee.property
+      if (prop.type === 'Identifier') {
+        const method = prop.name as 'log' | 'warn' | 'error' | 'info'
+        if (['log', 'warn', 'error', 'info'].includes(method)) {
+          // Evaluate arguments
+          const args = node.arguments.map((arg) => {
+            if (arg.type === 'SpreadElement') {
+              return formatValue(evaluateExpression(arg.argument, state))
+            }
+            return formatValue(evaluateExpression(arg as t.Expression, state))
+          })
+
+          const consoleOutput: ConsoleOutput = {
+            type: method,
+            args,
+          }
+
+          addStep(
+            state,
+            'console',
+            `console.${method}(${args.join(', ')})`,
+            node,
+            undefined,
+            consoleOutput
+          )
+          return undefined
+        }
+      }
+      // Skip other console methods
       return undefined
     }
     if (obj.type === 'Identifier' && obj.name === 'document') {
